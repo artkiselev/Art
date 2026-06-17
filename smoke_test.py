@@ -30,7 +30,7 @@ def main() -> None:
         assert prompt_path.exists()
         assert plan_path.exists()
         assert "Составь теплый" in prompt_path.read_text(encoding="utf-8")
-        assert "План свадебной церемонии" in plan_path.read_text(encoding="utf-8")
+        assert "Полный текст свадебной церемонии" in plan_path.read_text(encoding="utf-8")
     print("Smoke test passed")
 
 
