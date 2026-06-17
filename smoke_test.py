@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from documents import create_ceremony_prompt_txt, create_questionnaire_docx
+from documents import create_ceremony_plan_txt, create_ceremony_prompt_txt, create_questionnaire_docx
 from questionnaire import QUESTIONS, question_count
 from storage import Storage
 
@@ -25,9 +25,12 @@ def main() -> None:
 
         docx_path = create_questionnaire_docx(loaded.answers, root / "outputs", loaded.chat_id)
         prompt_path = create_ceremony_prompt_txt(loaded.answers, root / "outputs", loaded.chat_id)
+        plan_path = create_ceremony_plan_txt(loaded.answers, root / "outputs", loaded.chat_id)
         assert docx_path.exists()
         assert prompt_path.exists()
+        assert plan_path.exists()
         assert "Составь теплый" in prompt_path.read_text(encoding="utf-8")
+        assert "План свадебной церемонии" in plan_path.read_text(encoding="utf-8")
     print("Smoke test passed")
 
 

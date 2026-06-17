@@ -69,6 +69,68 @@ def create_ceremony_prompt_txt(answers: dict[str, str], output_dir: Path, chat_i
     return output_path
 
 
+def create_ceremony_plan_txt(answers: dict[str, str], output_dir: Path, chat_id: int) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    names = answers.get("couple_names", "")
+    filename_hint = _safe_filename(shorten(names, width=40, placeholder="")) if names else f"chat_{chat_id}"
+    output_path = output_dir / f"{filename_hint}_ceremony_plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    output_path.write_text(build_ceremony_plan(answers), encoding="utf-8")
+    return output_path
+
+
+def build_ceremony_plan(answers: dict[str, str]) -> str:
+    names = answers.get("couple_names", "Жених и невеста").strip() or "Жених и невеста"
+    relationship_story = answers.get("relationship_story", "").strip() or "использовать историю отношений из анкеты"
+    facts = answers.get("bride_groom_facts", "").strip() or "добавить личные факты о паре"
+    proposal = answers.get("proposal", "").strip() or "добавить историю предложения"
+    forbidden_topics = answers.get("forbidden_topics", "").strip() or "запретные темы не указаны"
+
+    return "\n".join(
+        [
+            f"План свадебной церемонии: {names}",
+            "",
+            "1. Начало церемонии",
+            "Короткое приветствие гостей, обозначить теплый и торжественный тон момента.",
+            "",
+            "2. Приглашение жениха",
+            "Плавно представить жениха, подчеркнуть его характер и ожидание встречи с невестой.",
+            "",
+            "3. Выход жениха",
+            f"Использовать факты: {facts}",
+            "",
+            "4. Подводка к выходу невесты",
+            "Сделать эмоциональный переход: внимание гостей переключается на появление невесты.",
+            "",
+            "5. Выход невесты",
+            "Оставить паузу для эмоций, затем мягко вернуть внимание к истории пары.",
+            "",
+            "6. История пары",
+            f"Основа блока: {relationship_story}",
+            "",
+            "7. История предложения",
+            f"Встроить как важный поворотный момент: {proposal}",
+            "",
+            "8. Подводка к клятвам",
+            "Сказать о выборе, доверии, совместном будущем и личных обещаниях.",
+            "",
+            "9. Клятвы",
+            "Дать слово жениху и невесте. Если клятв нет, заменить на короткий общий блок обещаний.",
+            "",
+            "10. Кольца",
+            "Подвести к символике колец: память о дне, поддержка, верность, общий путь.",
+            "",
+            "11. Объявление мужем и женой",
+            "Короткая торжественная формулировка и приглашение к первому поцелую/объятию.",
+            "",
+            "12. Финал",
+            "Поздравить пару, пригласить гостей поддержать аплодисментами и перейти к следующей части праздника.",
+            "",
+            "Ограничения и темы, которых не касаться:",
+            forbidden_topics,
+        ]
+    )
+
+
 def build_ceremony_prompt(answers: dict[str, str]) -> str:
     lines = [
         "Составь теплый, современный и живой текст свадебной церемонии на русском языке.",

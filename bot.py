@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from config import get_settings
-from documents import create_ceremony_prompt_txt, create_questionnaire_docx
+from documents import create_ceremony_plan_txt, create_ceremony_prompt_txt, create_questionnaire_docx
 from email_sender import EmailNotConfiguredError, send_result_email
 from questionnaire import QUESTIONS, format_question, question_count
 from storage import Session, Storage
@@ -135,6 +135,7 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, session: Session) -> None:
     docx_path = create_questionnaire_docx(session.answers, settings.output_dir, session.chat_id)
     prompt_path = create_ceremony_prompt_txt(session.answers, settings.output_dir, session.chat_id)
+    plan_path = create_ceremony_plan_txt(session.answers, settings.output_dir, session.chat_id)
 
     target_chat_id = settings.export_chat_id or session.chat_id
     caption = f"Готовая анкета от чата {session.chat_id}"
@@ -151,6 +152,12 @@ async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, se
             document=prompt_file,
             filename=prompt_path.name,
         )
+    with plan_path.open("rb") as plan_file:
+        await context.bot.send_document(
+            chat_id=target_chat_id,
+            document=plan_file,
+            filename=plan_path.name,
+        )
     if settings.export_chat_id and settings.export_chat_id != session.chat_id:
         await update.message.reply_text("Файлы сформированы и отправлены в группу.")
 
@@ -159,7 +166,7 @@ async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, se
             settings.yandex_smtp_login,
             settings.yandex_smtp_app_password,
             settings.result_email,
-            [docx_path, prompt_path],
+            [docx_path, prompt_path, plan_path],
         )
     except EmailNotConfiguredError:
         await update.message.reply_text(
