@@ -42,6 +42,7 @@ python -m venv .venv
 - `RESULT_EMAIL` - адрес, куда отправлять готовые файлы.
 - `YANDEX_SMTP_LOGIN` - логин почты Яндекса.
 - `YANDEX_SMTP_APP_PASSWORD` - пароль приложения Яндекса для SMTP.
+- `EXPORT_CHAT_ID` - чат/группа, куда бот отправляет готовые `.docx` и `.txt` после `/export`.
 - `DATABASE_PATH` - путь к SQLite-базе с прогрессом.
 - `OUTPUT_DIR` - папка для готовых файлов.
 

@@ -27,6 +27,7 @@ class Settings:
     result_email: str
     yandex_smtp_login: str
     yandex_smtp_app_password: str
+    export_chat_id: int | None
     database_path: Path
     output_dir: Path
 
@@ -40,6 +41,14 @@ def get_settings() -> Settings:
         result_email=os.getenv("RESULT_EMAIL", "mkshow@yandex.ru"),
         yandex_smtp_login=os.getenv("YANDEX_SMTP_LOGIN", "mkshow@yandex.ru"),
         yandex_smtp_app_password=os.getenv("YANDEX_SMTP_APP_PASSWORD", ""),
+        export_chat_id=_get_optional_int("EXPORT_CHAT_ID"),
         database_path=database_path,
         output_dir=output_dir,
     )
+
+
+def _get_optional_int(name: str) -> int | None:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return None
+    return int(value)

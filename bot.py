@@ -98,7 +98,7 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     logger.info("Received /export from chat_id=%s", chat_id)
     session = storage.get_or_create(chat_id)
-    await _export_session(update, session)
+    await _export_session(update, context, session)
 
 
 async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -124,7 +124,7 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         session.completed = True
         storage.save(session)
         await update.message.reply_text("Анкета заполнена. Сейчас сформирую файл.")
-        await _export_session(update, session)
+        await _export_session(update, context, session)
         return
 
     storage.save(session)
@@ -132,12 +132,27 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(format_question(session.current_index))
 
 
-async def _export_session(update: Update, session: Session) -> None:
+async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, session: Session) -> None:
     docx_path = create_questionnaire_docx(session.answers, settings.output_dir, session.chat_id)
     prompt_path = create_ceremony_prompt_txt(session.answers, settings.output_dir, session.chat_id)
 
-    await update.message.reply_document(document=docx_path.open("rb"), filename=docx_path.name)
-    await update.message.reply_document(document=prompt_path.open("rb"), filename=prompt_path.name)
+    target_chat_id = settings.export_chat_id or session.chat_id
+    caption = f"Готовая анкета от чата {session.chat_id}"
+    with docx_path.open("rb") as docx_file:
+        await context.bot.send_document(
+            chat_id=target_chat_id,
+            document=docx_file,
+            filename=docx_path.name,
+            caption=caption,
+        )
+    with prompt_path.open("rb") as prompt_file:
+        await context.bot.send_document(
+            chat_id=target_chat_id,
+            document=prompt_file,
+            filename=prompt_path.name,
+        )
+    if settings.export_chat_id and settings.export_chat_id != session.chat_id:
+        await update.message.reply_text("Файлы сформированы и отправлены в группу.")
 
     try:
         send_result_email(
@@ -155,6 +170,7 @@ async def _export_session(update: Update, session: Session) -> None:
         await update.message.reply_text(f"Файлы готовы, но письмо не отправилось: {exc}")
     else:
         await update.message.reply_text(f"Файлы отправлены на {settings.result_email}.")
+
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("Telegram handler failed. update=%s", update, exc_info=context.error)
