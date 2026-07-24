@@ -8,18 +8,27 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 
-from questionnaire import QUESTIONS, QUESTION_BY_KEY
+from openai_service import build_generation_prompt
+from questionnaire import QUESTIONS
 
 
 def _safe_filename(value: str) -> str:
     allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
     normalized = "".join(ch if ch in allowed else "_" for ch in value)
-    return normalized.strip("_") or "wedding_questionnaire"
+    return normalized.strip("_") or "wedding_ceremony"
+
+
+def _filename_hint(answers: dict[str, str], chat_id: int) -> str:
+    names = answers.get("couple_names", "")
+    return _safe_filename(shorten(names, width=40, placeholder="")) if names else f"chat_{chat_id}"
+
+
+def _timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 def _set_default_font(document: Document) -> None:
-    styles = document.styles
-    normal = styles["Normal"]
+    normal = document.styles["Normal"]
     normal.font.name = "Arial"
     normal.font.size = Pt(11)
 
@@ -31,7 +40,7 @@ def create_questionnaire_docx(answers: dict[str, str], output_dir: Path, chat_id
 
     title = document.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title.add_run("Свадебная анкета")
+    title_run = title.add_run("Анкета для свадебной церемонии")
     title_run.bold = True
     title_run.font.size = Pt(20)
 
@@ -44,264 +53,24 @@ def create_questionnaire_docx(answers: dict[str, str], output_dir: Path, chat_id
         if question.section != current_section:
             document.add_heading(question.section, level=1)
             current_section = question.section
-        document.add_paragraph(question.prompt, style=None).runs[0].bold = True
-        answer = answers.get(question.key, "").strip() or "Не заполнено"
-        document.add_paragraph(answer)
+        paragraph = document.add_paragraph()
+        paragraph.add_run(question.prompt).bold = True
+        document.add_paragraph(answers.get(question.key, "").strip() or "Не заполнено")
 
-    ceremony_prompt = build_ceremony_prompt(answers)
-    document.add_page_break()
-    document.add_heading("Промпт для подготовки церемонии через Codex", level=1)
-    document.add_paragraph(ceremony_prompt)
-
-    names = answers.get("couple_names", "")
-    filename_hint = _safe_filename(shorten(names, width=40, placeholder="")) if names else f"chat_{chat_id}"
-    output_path = output_dir / f"{filename_hint}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+    output_path = output_dir / f"{_filename_hint(answers, chat_id)}_questionnaire_{_timestamp()}.docx"
     document.save(output_path)
     return output_path
 
 
 def create_ceremony_prompt_txt(answers: dict[str, str], output_dir: Path, chat_id: int) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    names = answers.get("couple_names", "")
-    filename_hint = _safe_filename(shorten(names, width=40, placeholder="")) if names else f"chat_{chat_id}"
-    output_path = output_dir / f"{filename_hint}_ceremony_prompt_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    output_path.write_text(build_ceremony_prompt(answers), encoding="utf-8")
+    output_path = output_dir / f"{_filename_hint(answers, chat_id)}_ceremony_prompt_{_timestamp()}.txt"
+    output_path.write_text(build_generation_prompt(answers), encoding="utf-8")
     return output_path
 
 
-def create_ceremony_plan_txt(answers: dict[str, str], output_dir: Path, chat_id: int) -> Path:
+def create_ceremony_script_txt(script_text: str, answers: dict[str, str], output_dir: Path, chat_id: int) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    names = answers.get("couple_names", "")
-    filename_hint = _safe_filename(shorten(names, width=40, placeholder="")) if names else f"chat_{chat_id}"
-    output_path = output_dir / f"{filename_hint}_ceremony_script_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    output_path.write_text(build_ceremony_script(answers), encoding="utf-8")
+    output_path = output_dir / f"{_filename_hint(answers, chat_id)}_ceremony_script_{_timestamp()}.txt"
+    output_path.write_text(script_text.strip() + "\n", encoding="utf-8")
     return output_path
-
-
-def build_ceremony_script(answers: dict[str, str]) -> str:
-    names = _answer(answers, "couple_names", "наши молодые")
-    relationship_story = _answer(
-        answers,
-        "relationship_story",
-        "их история началась с момента, который они обязательно еще красиво опишут в анкете",
-    )
-    facts = _answer(
-        answers,
-        "bride_groom_facts",
-        "в них есть то самое сочетание характеров, которое делает пару живой, настоящей и очень своей",
-    )
-    work = _answer(answers, "work", "у каждого из них есть свое дело, свой ритм и свой путь")
-    hobbies = _answer(answers, "hobbies", "у них есть общие интересы, маленькие традиции и темы, которые сближают")
-    adventures = _answer(
-        answers,
-        "adventures",
-        "за их плечами уже есть совместные поездки, истории и моменты, которые стали частью их общего пути",
-    )
-    proposal = _answer(
-        answers,
-        "proposal",
-        "однажды прозвучал самый важный вопрос, и ответ на него привел всех нас к этому дню",
-    )
-    guest_reactions = _answer(
-        answers,
-        "guest_reactions",
-        "для близких эта новость стала очень теплым и радостным событием",
-    )
-    forbidden_topics = _answer(answers, "forbidden_topics", "особых ограничений в анкете не указано")
-
-    return "\n".join(
-        [
-            f"Полный текст свадебной церемонии для ведущего: {names}",
-            "",
-            "[Перед началом. Гости заняли места. Музыка звучит спокойно, ведущий выходит в центр.]",
-            "",
-            "Дорогие гости, добрый день.",
-            "Сегодня мы собрались здесь не просто для красивой церемонии. Мы собрались, чтобы стать свидетелями момента, с которого для двух людей начинается новая глава.",
-            f"Сегодня в центре этого дня - {names}.",
-            "И все, кто сейчас рядом, оказались здесь не случайно. Каждый из вас - часть их жизни, часть их истории, часть того тепла, которое сделало этот день возможным.",
-            "",
-            "[Пауза. Ведущий смотрит на гостей.]",
-            "",
-            "Свадьба - это не только торжественные слова, кольца и красивые фотографии.",
-            "Это момент, когда два человека открыто говорят друг другу: я выбираю тебя. Не только сегодня, когда все вокруг празднично и красиво. А каждый день - в простом, настоящем, живом будущем.",
-            "",
-            "[Приглашение жениха.]",
-            "",
-            "И сейчас я приглашаю человека, для которого этот день наполнен особым волнением.",
-            "Человека, который совсем скоро увидит ту, ради которой сердце сегодня бьется чуть быстрее.",
-            "Поприветствуем жениха.",
-            "",
-            "[Выход жениха. Пауза до момента, когда жених займет место.]",
-            "",
-            "Сегодня он стоит здесь не просто как герой красивого события.",
-            f"Он стоит здесь как человек со своей историей, своим характером, своими мечтами и своим путем. {facts}.",
-            f"В его жизни есть работа, дела, интересы и ежедневные заботы: {work}. Но сегодня все это отходит на второй план, потому что главный смысл этого момента - любовь, семья и человек, который сейчас появится рядом.",
-            "",
-            "[Подводка к выходу невесты.]",
-            "",
-            "А теперь наступает момент, которого ждали особенно.",
-            "Есть выходы, которые невозможно повторить. Есть секунды, в которых будто останавливается время.",
-            "И сейчас именно такой момент.",
-            "Дорогие гости, прошу вас встретить невесту.",
-            "",
-            "[Выход невесты. Ведущий делает паузу, не перекрывает музыку. После того как невеста рядом с женихом, продолжает.]",
-            "",
-            "Посмотрите на них.",
-            "В этой точке сошлось многое: знакомство, первые разговоры, волнение, смех, сомнения, решения, поддержка, планы, мечты.",
-            "И самое главное - здесь сошлись два человека, которые однажды стали друг для друга больше, чем просто частью жизни.",
-            "",
-            "[История пары.]",
-            "",
-            f"Их история - это не один день и не один красивый эпизод. {relationship_story}.",
-            f"В этой истории были свои приключения: {adventures}.",
-            f"Были общие интересы и то, что помогает им чувствовать себя ближе: {hobbies}.",
-            "И если смотреть на пару внимательно, становится понятно: любовь живет не только в больших жестах.",
-            "Она живет в деталях. В том, как человек смотрит. Как слушает. Как поддерживает. Как остается рядом, когда это действительно важно.",
-            "",
-            "[История предложения.]",
-            "",
-            f"И однажды в их истории появился момент, после которого многое стало особенно ясным. {proposal}.",
-            f"Для близких это тоже было событием: {guest_reactions}.",
-            "Потому что когда два человека находят друг друга, радуются не только они. Радуются все, кто любит их, кто видел их путь и кто сегодня находится рядом.",
-            "",
-            "[Переход к клятвам.]",
-            "",
-            "Сейчас наступает очень личная часть церемонии.",
-            "Клятвы - это не просто красивые слова. Это обещания, которые человек произносит не для зала, не для традиции, не для фотографии.",
-            "Он произносит их для того, кто стоит рядом.",
-            "",
-            "[Если клятвы подготовлены отдельно.]",
-            "И сейчас я передаю слово вам.",
-            "",
-            "[Клятва жениха. Пауза.]",
-            "[Клятва невесты. Пауза.]",
-            "",
-            "[Если клятв нет, ведущий читает общий блок.]",
-            "Если сегодня говорить самыми простыми словами, то семья начинается с готовности быть рядом.",
-            "Беречь друг друга. Слышать друг друга. Не забывать, что любовь - это не только чувство, но и действие.",
-            "Это выбор говорить честно, поддерживать бережно, радоваться искренне и проходить сложные моменты вместе.",
-            "",
-            "[Подводка к кольцам.]",
-            "",
-            "А теперь - символ, который будет напоминать об этом дне каждый день.",
-            "Кольца не имеют начала и конца. И именно поэтому они стали знаком обещания, которое продолжается дальше сегодняшнего праздника.",
-            "Пусть эти кольца напоминают вам не только о торжественной минуте, но и о том, что вы есть друг у друга.",
-            "",
-            "[Вынос колец. Пауза.]",
-            "",
-            "Пожалуйста, обменяйтесь кольцами.",
-            "",
-            "[Обмен кольцами.]",
-            "",
-            "Пусть в этих кольцах будет память о сегодняшнем дне.",
-            "Пусть в них будет спокойствие, когда нужно поддержать.",
-            "Радость, когда хочется разделить счастье.",
-            "И сила, когда важно выбрать друг друга снова.",
-            "",
-            "[Объявление.]",
-            "",
-            f"Дорогие {names}, сегодня вы сказали друг другу главное.",
-            "Перед вашими близкими, перед вашей историей и перед будущим, которое начинается прямо сейчас.",
-            "С огромной радостью объявляю вас мужем и женой.",
-            "",
-            "[Пауза, аплодисменты.]",
-            "",
-            "Можете поздравить друг друга первым поцелуем в новом статусе.",
-            "",
-            "[Поцелуй. Аплодисменты.]",
-            "",
-            "[Финал.]",
-            "",
-            "Дорогие гости, поддержим наших молодоженов громкими аплодисментами.",
-            "Пусть их семейная жизнь будет живой, честной, теплой и наполненной тем самым ощущением: дома я там, где мы вместе.",
-            "А сейчас начинается праздник, в котором будет много поздравлений, улыбок, музыки и моментов, которые они точно запомнят.",
-            "",
-            "[Служебная заметка для ведущего.]",
-            f"Темы, которых не касаться: {forbidden_topics}.",
-            "Перед церемонией перечитать анкету полностью и заменить общие фразы на конкретные имена, истории и детали пары.",
-        ]
-    )
-
-
-def _answer(answers: dict[str, str], key: str, fallback: str) -> str:
-    value = answers.get(key, "").strip()
-    return value if value else fallback
-
-
-def build_ceremony_plan(answers: dict[str, str]) -> str:
-    names = answers.get("couple_names", "Жених и невеста").strip() or "Жених и невеста"
-    relationship_story = answers.get("relationship_story", "").strip() or "использовать историю отношений из анкеты"
-    facts = answers.get("bride_groom_facts", "").strip() or "добавить личные факты о паре"
-    proposal = answers.get("proposal", "").strip() or "добавить историю предложения"
-    forbidden_topics = answers.get("forbidden_topics", "").strip() or "запретные темы не указаны"
-
-    return "\n".join(
-        [
-            f"План свадебной церемонии: {names}",
-            "",
-            "1. Начало церемонии",
-            "Короткое приветствие гостей, обозначить теплый и торжественный тон момента.",
-            "",
-            "2. Приглашение жениха",
-            "Плавно представить жениха, подчеркнуть его характер и ожидание встречи с невестой.",
-            "",
-            "3. Выход жениха",
-            f"Использовать факты: {facts}",
-            "",
-            "4. Подводка к выходу невесты",
-            "Сделать эмоциональный переход: внимание гостей переключается на появление невесты.",
-            "",
-            "5. Выход невесты",
-            "Оставить паузу для эмоций, затем мягко вернуть внимание к истории пары.",
-            "",
-            "6. История пары",
-            f"Основа блока: {relationship_story}",
-            "",
-            "7. История предложения",
-            f"Встроить как важный поворотный момент: {proposal}",
-            "",
-            "8. Подводка к клятвам",
-            "Сказать о выборе, доверии, совместном будущем и личных обещаниях.",
-            "",
-            "9. Клятвы",
-            "Дать слово жениху и невесте. Если клятв нет, заменить на короткий общий блок обещаний.",
-            "",
-            "10. Кольца",
-            "Подвести к символике колец: память о дне, поддержка, верность, общий путь.",
-            "",
-            "11. Объявление мужем и женой",
-            "Короткая торжественная формулировка и приглашение к первому поцелую/объятию.",
-            "",
-            "12. Финал",
-            "Поздравить пару, пригласить гостей поддержать аплодисментами и перейти к следующей части праздника.",
-            "",
-            "Ограничения и темы, которых не касаться:",
-            forbidden_topics,
-        ]
-    )
-
-
-def build_ceremony_prompt(answers: dict[str, str]) -> str:
-    lines = [
-        "Составь теплый, современный и живой текст свадебной церемонии на русском языке.",
-        "Тон: искренний, не слишком официальный, без пошлых шуток и без тем, которые пара запретила.",
-        "",
-        "Структура церемонии:",
-        "1. Начало церемонии.",
-        "2. Вступительная речь и плавный переход к приглашению жениха.",
-        "3. Выход жениха и короткая история про него.",
-        "4. Подводка к выходу невесты.",
-        "5. Выход невесты.",
-        "6. Информация про нее, про него и про их отношения.",
-        "7. Подводка к клятвам.",
-        "8. Подводка к объявлению мужем и женой.",
-        "9. Подводка к выносу колец.",
-        "10. Финал.",
-        "",
-        "Данные анкеты:",
-    ]
-    for key, value in answers.items():
-        question = QUESTION_BY_KEY.get(key)
-        label = question.prompt if question else key
-        lines.append(f"\n{label}\n{value.strip() or 'Не заполнено'}")
-    return "\n".join(lines)

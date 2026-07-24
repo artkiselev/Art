@@ -24,26 +24,35 @@ def load_env(path: Path = ROOT_DIR / ".env") -> None:
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
+    openai_api_key: str
+    openai_text_model: str
+    openai_transcribe_model: str
     result_email: str
     yandex_smtp_login: str
     yandex_smtp_app_password: str
     export_chat_id: int | None
     database_path: Path
     output_dir: Path
+    voice_dir: Path
 
 
 def get_settings() -> Settings:
     load_env()
     output_dir = ROOT_DIR / os.getenv("OUTPUT_DIR", "outputs")
+    voice_dir = ROOT_DIR / os.getenv("VOICE_DIR", "data/voice")
     database_path = ROOT_DIR / os.getenv("DATABASE_PATH", "data/wedding_bot.sqlite3")
     return Settings(
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+        openai_text_model=os.getenv("OPENAI_TEXT_MODEL", "gpt-5"),
+        openai_transcribe_model=os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe"),
         result_email=os.getenv("RESULT_EMAIL", "mkshow@yandex.ru"),
         yandex_smtp_login=os.getenv("YANDEX_SMTP_LOGIN", "mkshow@yandex.ru"),
         yandex_smtp_app_password=os.getenv("YANDEX_SMTP_APP_PASSWORD", ""),
         export_chat_id=_get_optional_int("EXPORT_CHAT_ID"),
         database_path=database_path,
         output_dir=output_dir,
+        voice_dir=voice_dir,
     )
 
 

@@ -14,6 +14,7 @@ class Session:
     answers: dict[str, str]
     completed: bool
     updated_at: str
+    version: int = 1
 
 
 class Storage:
@@ -34,27 +35,45 @@ class Storage:
                     current_index INTEGER NOT NULL DEFAULT 0,
                     answers_json TEXT NOT NULL DEFAULT '{}',
                     completed INTEGER NOT NULL DEFAULT 0,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1
                 )
                 """
             )
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(sessions)").fetchall()
+            }
+            if "version" not in columns:
+                conn.execute("ALTER TABLE sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
 
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def get_or_create(self, chat_id: int) -> Session:
+    def get_or_create(self, chat_id: int, version: int = 1) -> Session:
+        session = self.get(chat_id)
+        if session:
+            if session.version != version:
+                self.reset(chat_id)
+            else:
+                return session
+        session = Session(chat_id, 0, {}, False, self._now(), version)
+        self.save(session)
+        return session
+
+    def get_or_create_legacy(self, chat_id: int) -> Session:
         session = self.get(chat_id)
         if session:
             return session
-        session = Session(chat_id, 0, {}, False, self._now())
+        session = Session(chat_id, 0, {}, False, self._now(), 1)
         self.save(session)
         return session
 
     def get(self, chat_id: int) -> Session | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT chat_id, current_index, answers_json, completed, updated_at FROM sessions WHERE chat_id = ?",
+                "SELECT chat_id, current_index, answers_json, completed, updated_at, version FROM sessions WHERE chat_id = ?",
                 (chat_id,),
             ).fetchone()
         if not row:
@@ -65,6 +84,7 @@ class Storage:
             answers=json.loads(row[2]),
             completed=bool(row[3]),
             updated_at=row[4],
+            version=row[5],
         )
 
     def save(self, session: Session) -> None:
@@ -72,13 +92,14 @@ class Storage:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sessions (chat_id, current_index, answers_json, completed, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sessions (chat_id, current_index, answers_json, completed, updated_at, version)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(chat_id) DO UPDATE SET
                     current_index = excluded.current_index,
                     answers_json = excluded.answers_json,
                     completed = excluded.completed,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    version = excluded.version
                 """,
                 (
                     session.chat_id,
@@ -86,6 +107,7 @@ class Storage:
                     json.dumps(session.answers, ensure_ascii=False),
                     int(session.completed),
                     session.updated_at,
+                    session.version,
                 ),
             )
 

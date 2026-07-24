@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from pathlib import Path
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from config import get_settings
-from documents import create_ceremony_plan_txt, create_ceremony_prompt_txt, create_questionnaire_docx
+from documents import create_ceremony_prompt_txt, create_ceremony_script_txt, create_questionnaire_docx
 from email_sender import EmailNotConfiguredError, send_result_email
-from questionnaire import QUESTIONS, format_question, question_count
+from openai_service import OpenAIServiceError, generate_ceremony_script, transcribe_audio
+from questionnaire import QUESTIONNAIRE_VERSION, QUESTIONS, format_question, question_count, remaining_count
 from storage import Session, Storage
 
 
@@ -24,26 +27,30 @@ storage = Storage(settings.database_path)
 
 HELP_TEXT = """
 Команды:
-/start - начать или продолжить анкету
+/start - начать или продолжить короткую анкету для церемонии
 /resume - показать текущий вопрос
 /edit НОМЕР - изменить ответ на вопрос, например /edit 3
-/export - сформировать файл и отправить на почту
+/export - сформировать документы после завершения анкеты
 /reset - начать заново
 /help - помощь
 """.strip()
 
 
+def _session(chat_id: int) -> Session:
+    return storage.get_or_create(chat_id, version=QUESTIONNAIRE_VERSION)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     logger.info("Received /start from chat_id=%s", chat_id)
-    session = storage.get_or_create(chat_id)
+    session = _session(chat_id)
     if session.completed:
         await update.message.reply_text(
             "Анкета уже заполнена. Можно отправить /export, изменить вопрос через /edit НОМЕР или начать заново через /reset."
         )
         return
     await update.message.reply_text(
-        "Начинаем свадебную анкету. Ответы можно писать свободным текстом, прогресс сохраняется после каждого сообщения."
+        "Начинаем короткую анкету для церемонии. Можно отвечать текстом или голосовым сообщением."
     )
     await update.message.reply_text(format_question(session.current_index))
 
@@ -56,9 +63,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     logger.info("Received /resume from chat_id=%s", chat_id)
-    session = storage.get_or_create(chat_id)
+    session = _session(chat_id)
     if session.completed:
-        await update.message.reply_text("Анкета заполнена. Отправьте /export, чтобы сформировать файл заново.")
+        await update.message.reply_text("Анкета заполнена. Отправьте /export, чтобы сформировать документы.")
         return
     await update.message.reply_text(format_question(session.current_index))
 
@@ -67,7 +74,7 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     logger.info("Received /reset from chat_id=%s", chat_id)
     storage.reset(chat_id)
-    session = storage.get_or_create(chat_id)
+    session = _session(chat_id)
     await update.message.reply_text("Анкета сброшена. Начинаем заново.")
     await update.message.reply_text(format_question(session.current_index))
 
@@ -75,7 +82,7 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     logger.info("Received /edit from chat_id=%s args=%s", chat_id, context.args)
-    session = storage.get_or_create(chat_id)
+    session = _session(chat_id)
     if not context.args:
         await update.message.reply_text("Укажите номер вопроса: например /edit 3")
         return
@@ -90,29 +97,64 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     session.current_index = number - 1
     session.completed = False
     storage.save(session)
-    await update.message.reply_text("Хорошо, изменим этот ответ.")
+    await update.message.reply_text("Хорошо, изменим этот ответ. Можно ответить текстом или голосом.")
     await update.message.reply_text(format_question(session.current_index))
 
 
 async def export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     logger.info("Received /export from chat_id=%s", chat_id)
-    session = storage.get_or_create(chat_id)
+    session = _session(chat_id)
+    if not session.completed:
+        await update.message.reply_text(
+            f"Для полной речи нужно закончить анкету. Осталось вопросов: {remaining_count(session.current_index)}."
+        )
+        await update.message.reply_text(format_question(session.current_index))
+        return
     await _export_session(update, context, session)
 
 
-async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     logger.info("Received text answer from chat_id=%s", chat_id)
-    session = storage.get_or_create(chat_id)
     text = update.message.text.strip()
     if not text:
-        await update.message.reply_text("Пожалуйста, отправьте ответ текстом.")
+        await update.message.reply_text("Пожалуйста, отправьте ответ текстом или голосовым сообщением.")
+        return
+    await _store_answer(update, context, text)
+
+
+async def handle_voice_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    logger.info("Received voice/audio answer from chat_id=%s", chat_id)
+    if not settings.openai_api_key:
+        await update.message.reply_text("Для голосовых ответов нужен OPENAI_API_KEY в файле .env.")
         return
 
+    await update.message.reply_text("Слушаю голосовое и перевожу в текст...")
+    try:
+        audio_path = await _download_audio(update, context)
+        text = await asyncio.to_thread(
+            transcribe_audio,
+            settings.openai_api_key,
+            settings.openai_transcribe_model,
+            audio_path,
+        )
+    except Exception as exc:
+        logger.exception("Voice transcription failed")
+        await update.message.reply_text(f"Не получилось распознать голосовое: {exc}")
+        return
+
+    await update.message.reply_text(f"Я записал ответ так:\n\n{text}")
+    await _store_answer(update, context, text)
+
+
+async def _store_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    chat_id = update.effective_chat.id
+    session = _session(chat_id)
     if session.completed:
         await update.message.reply_text(
-            "Анкета уже заполнена. Для изменения используйте /edit НОМЕР, для файла - /export."
+            "Анкета уже заполнена. Для изменения используйте /edit НОМЕР, для документов - /export."
         )
         return
 
@@ -123,7 +165,7 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if session.current_index >= question_count():
         session.completed = True
         storage.save(session)
-        await update.message.reply_text("Анкета заполнена. Сейчас сформирую файл.")
+        await update.message.reply_text("Анкета заполнена. Сейчас подготовлю полную речь ведущего и документы.")
         await _export_session(update, context, session)
         return
 
@@ -132,13 +174,48 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(format_question(session.current_index))
 
 
+async def _download_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Path:
+    settings.voice_dir.mkdir(parents=True, exist_ok=True)
+    message = update.message
+    media = message.voice or message.audio
+    if media is None:
+        raise RuntimeError("В сообщении нет голосового или аудиофайла.")
+
+    suffix = ".ogg" if message.voice else Path(message.audio.file_name or "audio.m4a").suffix or ".m4a"
+    file_name = f"{message.chat_id}_{message.message_id}{suffix}"
+    target_path = settings.voice_dir / file_name
+    telegram_file = await context.bot.get_file(media.file_id)
+    await telegram_file.download_to_drive(custom_path=str(target_path))
+    return target_path
+
+
 async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, session: Session) -> None:
+    if not settings.openai_api_key:
+        await update.message.reply_text("Не могу создать финальную речь: добавьте OPENAI_API_KEY в .env.")
+        return
+
+    await update.message.reply_text("Генерирую полный текст церемонии. Это может занять немного времени.")
+    try:
+        script_text = await asyncio.to_thread(
+            generate_ceremony_script,
+            settings.openai_api_key,
+            settings.openai_text_model,
+            session.answers,
+        )
+    except OpenAIServiceError as exc:
+        await update.message.reply_text(f"OpenAI не вернул текст церемонии: {exc}")
+        return
+    except Exception as exc:
+        logger.exception("Ceremony generation failed")
+        await update.message.reply_text(f"Не получилось создать речь церемонии: {exc}")
+        return
+
     docx_path = create_questionnaire_docx(session.answers, settings.output_dir, session.chat_id)
     prompt_path = create_ceremony_prompt_txt(session.answers, settings.output_dir, session.chat_id)
-    plan_path = create_ceremony_plan_txt(session.answers, settings.output_dir, session.chat_id)
+    script_path = create_ceremony_script_txt(script_text, session.answers, settings.output_dir, session.chat_id)
 
     target_chat_id = settings.export_chat_id or session.chat_id
-    caption = f"Готовая анкета от чата {session.chat_id}"
+    caption = f"Готовая церемониальная анкета от чата {session.chat_id}"
     with docx_path.open("rb") as docx_file:
         await context.bot.send_document(
             chat_id=target_chat_id,
@@ -152,11 +229,11 @@ async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, se
             document=prompt_file,
             filename=prompt_path.name,
         )
-    with plan_path.open("rb") as plan_file:
+    with script_path.open("rb") as script_file:
         await context.bot.send_document(
             chat_id=target_chat_id,
-            document=plan_file,
-            filename=plan_path.name,
+            document=script_file,
+            filename=script_path.name,
         )
     if settings.export_chat_id and settings.export_chat_id != session.chat_id:
         await update.message.reply_text("Файлы сформированы и отправлены в группу.")
@@ -166,11 +243,11 @@ async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, se
             settings.yandex_smtp_login,
             settings.yandex_smtp_app_password,
             settings.result_email,
-            [docx_path, prompt_path, plan_path],
+            [docx_path, prompt_path, script_path],
         )
     except EmailNotConfiguredError:
         await update.message.reply_text(
-            "Файлы готовы и отправлены сюда. Почта пока не настроена: добавьте YANDEX_SMTP_APP_PASSWORD в .env."
+            "Файлы готовы. Почта пока не настроена: добавьте YANDEX_SMTP_APP_PASSWORD в .env."
         )
     except Exception as exc:
         logger.exception("Failed to send email")
@@ -194,7 +271,8 @@ def main() -> None:
     application.add_handler(CommandHandler("reset", reset))
     application.add_handler(CommandHandler("edit", edit))
     application.add_handler(CommandHandler("export", export))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_answer))
+    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_answer))
     application.add_error_handler(error_handler)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 

@@ -1,86 +1,58 @@
-# Wedding Bot
+# Wedding Ceremony Bot
 
-Telegram-бот для сбора свадебной анкеты пары. Бот задает вопросы по очереди, сохраняет прогресс, формирует Word-файл, отдельный промпт для подготовки текста церемонии через Codex и готовый план церемонии.
+Telegram-бот для короткой анкеты свадебной церемонии. Пользователь отвечает текстом или голосом, бот сохраняет ответы, распознает голос через OpenAI API и после завершения анкеты генерирует полный текст церемонии для ведущего.
 
-## Быстрый запуск через Codex
-
-1. Установите зависимости:
-
-   ```powershell
-   .venv\Scripts\python.exe -m pip install -r requirements.txt
-   ```
-
-2. Создайте `.env` по примеру `.env.example`.
-
-3. Запустите бот:
-
-   ```powershell
-   .\run_bot.ps1
-   ```
-
-Для фонового запуска через Codex/Windows можно использовать:
+## Запуск
 
 ```powershell
-.venv\Scripts\python.exe run_background.py
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe bot.py
 ```
 
-Или через Windows CMD:
+Локальный фоновый запуск на Windows:
 
 ```cmd
 run_background.cmd
 ```
 
-Если виртуального окружения еще нет, создайте его:
+## Настройки `.env`
 
-```powershell
-python -m venv .venv
+```env
+TELEGRAM_BOT_TOKEN=...
+OPENAI_API_KEY=...
+OPENAI_TEXT_MODEL=gpt-5
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+RESULT_EMAIL=mkshow@yandex.ru
+YANDEX_SMTP_LOGIN=mkshow@yandex.ru
+YANDEX_SMTP_APP_PASSWORD=...
+EXPORT_CHAT_ID=-1004429435070
+DATABASE_PATH=data/wedding_bot.sqlite3
+OUTPUT_DIR=outputs
+VOICE_DIR=data/voice
 ```
 
-## Настройки
-
-- `TELEGRAM_BOT_TOKEN` - токен Telegram-бота от BotFather.
-- `RESULT_EMAIL` - адрес, куда отправлять готовые файлы.
-- `YANDEX_SMTP_LOGIN` - логин почты Яндекса.
-- `YANDEX_SMTP_APP_PASSWORD` - пароль приложения Яндекса для SMTP.
-- `EXPORT_CHAT_ID` - чат/группа, куда бот отправляет готовые `.docx` и `.txt` после `/export`.
-- `DATABASE_PATH` - путь к SQLite-базе с прогрессом.
-- `OUTPUT_DIR` - папка для готовых файлов.
-
-Обычный пароль от почты для SMTP использовать не нужно. Нужен пароль приложения.
+`.env` не попадает в GitHub.
 
 ## Команды бота
 
-- `/start` - начать или продолжить анкету.
+- `/start` - начать или продолжить короткую анкету.
 - `/resume` - показать текущий вопрос.
-- `/edit НОМЕР` - изменить ответ на вопрос, например `/edit 3`.
-- `/export` - сформировать файл и отправить на почту.
+- `/edit НОМЕР` - изменить ответ, например `/edit 3`.
+- `/export` - сформировать документы после завершения анкеты.
 - `/reset` - начать заново.
 - `/help` - помощь.
 
+## Что делает экспорт
+
+После завершения анкеты бот отправляет в группу:
+
+- `.docx` с заполненной анкетой;
+- `.txt` с исходным промптом;
+- `.txt` с полным текстом церемонии для ведущего.
+
+Если анкета не закончена, `/export` покажет, сколько вопросов осталось, и не будет генерировать финальную речь.
+
 ## Автономная работа
 
-Чтобы бот работал постоянно:
-
-1. Разместите проект на VPS.
-2. Установите Python и зависимости.
-3. Создайте `.env` на сервере.
-4. Запустите бот через `systemd` или Docker Compose.
-5. Настройте автоперезапуск и резервное копирование папок `data/` и `outputs/`.
-
-Пример `systemd`-службы:
-
-```ini
-[Unit]
-Description=Wedding Telegram Bot
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/wedding-bot
-ExecStart=/opt/wedding-bot/.venv/bin/python bot.py
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-```
+Для постоянной работы бот нужно перенести на VPS/сервер и запустить как службу, например через `systemd` или Docker Compose. Важно сохранить `.env`, базу `data/` и папку `outputs/` вне Git.
