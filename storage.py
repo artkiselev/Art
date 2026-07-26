@@ -15,6 +15,7 @@ class Session:
     completed: bool
     updated_at: str
     version: int = 1
+    status: str = "collecting"
 
 
 class Storage:
@@ -46,6 +47,8 @@ class Storage:
             }
             if "version" not in columns:
                 conn.execute("ALTER TABLE sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+            if "status" not in columns:
+                conn.execute("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'collecting'")
 
     @staticmethod
     def _now() -> str:
@@ -58,7 +61,7 @@ class Storage:
                 self.reset(chat_id)
             else:
                 return session
-        session = Session(chat_id, 0, {}, False, self._now(), version)
+        session = Session(chat_id, 0, {}, False, self._now(), version, "collecting")
         self.save(session)
         return session
 
@@ -66,18 +69,21 @@ class Storage:
         session = self.get(chat_id)
         if session:
             return session
-        session = Session(chat_id, 0, {}, False, self._now(), 1)
+        session = Session(chat_id, 0, {}, False, self._now(), 1, "collecting")
         self.save(session)
         return session
 
     def get(self, chat_id: int) -> Session | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT chat_id, current_index, answers_json, completed, updated_at, version FROM sessions WHERE chat_id = ?",
+                "SELECT chat_id, current_index, answers_json, completed, updated_at, version, status FROM sessions WHERE chat_id = ?",
                 (chat_id,),
             ).fetchone()
         if not row:
             return None
+        status = row[6]
+        if bool(row[3]) and status == "collecting":
+            status = "review"
         return Session(
             chat_id=row[0],
             current_index=row[1],
@@ -85,6 +91,7 @@ class Storage:
             completed=bool(row[3]),
             updated_at=row[4],
             version=row[5],
+            status=status,
         )
 
     def save(self, session: Session) -> None:
@@ -92,14 +99,15 @@ class Storage:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sessions (chat_id, current_index, answers_json, completed, updated_at, version)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO sessions (chat_id, current_index, answers_json, completed, updated_at, version, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(chat_id) DO UPDATE SET
                     current_index = excluded.current_index,
                     answers_json = excluded.answers_json,
                     completed = excluded.completed,
                     updated_at = excluded.updated_at,
-                    version = excluded.version
+                    version = excluded.version,
+                    status = excluded.status
                 """,
                 (
                     session.chat_id,
@@ -108,6 +116,7 @@ class Storage:
                     int(session.completed),
                     session.updated_at,
                     session.version,
+                    session.status,
                 ),
             )
 

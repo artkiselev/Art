@@ -90,5 +90,38 @@ def format_question(index: int) -> str:
     )
 
 
+def format_question_for_edit(index: int) -> str:
+    question = QUESTIONS[index]
+    return (
+        f"Изменяем вопрос {index + 1} из {len(QUESTIONS)}\n"
+        f"Раздел: {question.section}\n\n"
+        f"{question.prompt}\n\n"
+        "Отправьте новый ответ текстом или голосовым сообщением."
+    )
+
+
+def format_answers_review(answers: dict[str, str]) -> str:
+    lines = [
+        "Анкета заполнена. Проверьте, пожалуйста, ответы:",
+        "",
+    ]
+    for index, question in enumerate(QUESTIONS, start=1):
+        value = answers.get(question.key, "").strip() or "Не заполнено"
+        lines.extend(
+            [
+                f"{index}. {question.prompt}",
+                f"Ответ: {value}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Если нужно изменить ответ, напишите номер вопроса.",
+            "Если все верно, отправьте /confirm или напишите: подтверждаю",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def remaining_count(current_index: int) -> int:
     return max(0, len(QUESTIONS) - current_index)
