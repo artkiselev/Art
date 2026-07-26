@@ -35,6 +35,23 @@ HELP_TEXT = """
 /help - помощь
 """.strip()
 
+PREPARING_EXPORT_TEXT = (
+    "Спасибо, анкета заполнена. Я бережно собираю ваши ответы в материалы для церемонии, "
+    "это займет немного времени."
+)
+
+FINAL_SUCCESS_TEXT = (
+    "Готово. Анкета принята, а материалы уже переданы ведущему.\n\n"
+    "Спасибо, что так подробно рассказали вашу историю. Теперь можно выдохнуть, "
+    "расслабиться и спокойно ждать день церемонии - дальше мы соберем из ваших ответов "
+    "красивую, личную и теплую церемонию."
+)
+
+FINAL_FAILURE_TEXT = (
+    "Пока не получилось подготовить материалы. Попробуйте отправить /export чуть позже "
+    "или напишите ведущему."
+)
+
 
 def _session(chat_id: int) -> Session:
     return storage.get_or_create(chat_id, version=QUESTIONNAIRE_VERSION)
@@ -128,7 +145,8 @@ async def handle_voice_answer(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = update.effective_chat.id
     logger.info("Received voice/audio answer from chat_id=%s", chat_id)
     if not settings.openai_api_key:
-        await update.message.reply_text("Для голосовых ответов нужен OPENAI_API_KEY в файле .env.")
+        logger.error("Cannot transcribe voice answer from chat_id=%s: OPENAI_API_KEY is empty", chat_id)
+        await update.message.reply_text("Пока не получается принять голосовой ответ. Пожалуйста, ответьте текстом.")
         return
 
     await update.message.reply_text("Слушаю голосовое и перевожу в текст...")
@@ -140,9 +158,9 @@ async def handle_voice_answer(update: Update, context: ContextTypes.DEFAULT_TYPE
             settings.openai_transcribe_model,
             audio_path,
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Voice transcription failed")
-        await update.message.reply_text(f"Не получилось распознать голосовое: {exc}")
+        await update.message.reply_text("Не получилось разобрать голосовое сообщение. Пожалуйста, ответьте текстом.")
         return
 
     await update.message.reply_text(f"Я записал ответ так:\n\n{text}")
@@ -165,7 +183,6 @@ async def _store_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, text
     if session.current_index >= question_count():
         session.completed = True
         storage.save(session)
-        await update.message.reply_text("Анкета заполнена. Сейчас подготовлю полную речь ведущего и документы.")
         await _export_session(update, context, session)
         return
 
@@ -191,10 +208,11 @@ async def _download_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, session: Session) -> None:
     if not settings.openai_api_key:
-        await update.message.reply_text("Не могу создать финальную речь: добавьте OPENAI_API_KEY в .env.")
+        logger.error("Cannot export session %s: OPENAI_API_KEY is empty", session.chat_id)
+        await update.message.reply_text(FINAL_FAILURE_TEXT)
         return
 
-    await update.message.reply_text("Генерирую полный текст церемонии. Это может занять немного времени.")
+    await update.message.reply_text(PREPARING_EXPORT_TEXT)
     try:
         script_text = await asyncio.to_thread(
             generate_ceremony_script,
@@ -203,40 +221,44 @@ async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, se
             session.answers,
         )
     except OpenAIServiceError as exc:
-        await update.message.reply_text(f"OpenAI не вернул текст церемонии: {exc}")
+        logger.exception("OpenAI did not return ceremony script: %s", exc)
+        await update.message.reply_text(FINAL_FAILURE_TEXT)
         return
-    except Exception as exc:
+    except Exception:
         logger.exception("Ceremony generation failed")
-        await update.message.reply_text(f"Не получилось создать речь церемонии: {exc}")
+        await update.message.reply_text(FINAL_FAILURE_TEXT)
         return
 
-    docx_path = create_questionnaire_docx(session.answers, settings.output_dir, session.chat_id)
-    prompt_path = create_ceremony_prompt_txt(session.answers, settings.output_dir, session.chat_id)
-    script_path = create_ceremony_script_txt(script_text, session.answers, settings.output_dir, session.chat_id)
+    try:
+        docx_path = create_questionnaire_docx(session.answers, settings.output_dir, session.chat_id)
+        prompt_path = create_ceremony_prompt_txt(session.answers, settings.output_dir, session.chat_id)
+        script_path = create_ceremony_script_txt(script_text, session.answers, settings.output_dir, session.chat_id)
 
-    target_chat_id = settings.export_chat_id or session.chat_id
-    caption = f"Готовая церемониальная анкета от чата {session.chat_id}"
-    with docx_path.open("rb") as docx_file:
-        await context.bot.send_document(
-            chat_id=target_chat_id,
-            document=docx_file,
-            filename=docx_path.name,
-            caption=caption,
-        )
-    with prompt_path.open("rb") as prompt_file:
-        await context.bot.send_document(
-            chat_id=target_chat_id,
-            document=prompt_file,
-            filename=prompt_path.name,
-        )
-    with script_path.open("rb") as script_file:
-        await context.bot.send_document(
-            chat_id=target_chat_id,
-            document=script_file,
-            filename=script_path.name,
-        )
-    if settings.export_chat_id and settings.export_chat_id != session.chat_id:
-        await update.message.reply_text("Файлы сформированы и отправлены в группу.")
+        target_chat_id = settings.export_chat_id or session.chat_id
+        caption = f"Готовая церемониальная анкета от чата {session.chat_id}"
+        with docx_path.open("rb") as docx_file:
+            await context.bot.send_document(
+                chat_id=target_chat_id,
+                document=docx_file,
+                filename=docx_path.name,
+                caption=caption,
+            )
+        with prompt_path.open("rb") as prompt_file:
+            await context.bot.send_document(
+                chat_id=target_chat_id,
+                document=prompt_file,
+                filename=prompt_path.name,
+            )
+        with script_path.open("rb") as script_file:
+            await context.bot.send_document(
+                chat_id=target_chat_id,
+                document=script_file,
+                filename=script_path.name,
+            )
+    except Exception:
+        logger.exception("Failed to create or send export files")
+        await update.message.reply_text(FINAL_FAILURE_TEXT)
+        return
 
     try:
         send_result_email(
@@ -246,14 +268,13 @@ async def _export_session(update: Update, context: ContextTypes.DEFAULT_TYPE, se
             [docx_path, prompt_path, script_path],
         )
     except EmailNotConfiguredError:
-        await update.message.reply_text(
-            "Файлы готовы. Почта пока не настроена: добавьте YANDEX_SMTP_APP_PASSWORD в .env."
-        )
-    except Exception as exc:
+        logger.info("Email is not configured; skipping email delivery for chat_id=%s", session.chat_id)
+    except Exception:
         logger.exception("Failed to send email")
-        await update.message.reply_text(f"Файлы готовы, но письмо не отправилось: {exc}")
     else:
-        await update.message.reply_text(f"Файлы отправлены на {settings.result_email}.")
+        logger.info("Export email sent to %s for chat_id=%s", settings.result_email, session.chat_id)
+
+    await update.message.reply_text(FINAL_SUCCESS_TEXT)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
