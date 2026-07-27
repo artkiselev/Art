@@ -28,6 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 settings = get_settings()
 storage = Storage(settings.database_path)
