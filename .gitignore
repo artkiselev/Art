@@ -1,8 +1,11 @@
 .env
+.vps.env
 __pycache__/
 *.py[cod]
 .venv/
 venv/
 data/
 outputs/
+deploy_package/
+wedding_bot_deploy_package.zip
 .pytest_cache/

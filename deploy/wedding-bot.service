@@ -1,0 +1,15 @@
+[Unit]
+Description=Wedding Ceremony Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/wedding-bot
+ExecStart=/opt/wedding-bot/.venv/bin/python /opt/wedding-bot/bot.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
