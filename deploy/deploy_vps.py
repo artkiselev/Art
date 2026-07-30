@@ -21,6 +21,7 @@ PROJECT_FILES = [
     "storage.py",
     "telegram_sender.py",
     "web_app.py",
+    "web_app_premium.py",
     "web_storage.py",
     "README.md",
 ]
@@ -63,15 +64,21 @@ def main() -> None:
         write_remote_file(client, "/etc/systemd/system/wedding-bot.service", service_text)
         web_service_text = (ROOT / "deploy" / "wedding-web.service").read_text(encoding="utf-8")
         write_remote_file(client, "/etc/systemd/system/wedding-web.service", web_service_text)
+        premium_service_text = (ROOT / "deploy" / "wedding-web-premium.service").read_text(encoding="utf-8")
+        write_remote_file(client, "/etc/systemd/system/wedding-web-premium.service", premium_service_text)
         run(client, "systemctl daemon-reload")
         run(client, "systemctl enable wedding-bot")
         run(client, "systemctl enable wedding-web")
+        run(client, "systemctl enable wedding-web-premium")
         run(client, "systemctl restart wedding-bot")
         run(client, "systemctl restart wedding-web")
+        run(client, "systemctl restart wedding-web-premium")
         run(client, "ufw allow 8080/tcp || true", check=False)
+        run(client, "ufw allow 8081/tcp || true", check=False)
         time.sleep(3)
         run(client, "systemctl --no-pager --full status wedding-bot", check=False)
         run(client, "systemctl --no-pager --full status wedding-web", check=False)
+        run(client, "systemctl --no-pager --full status wedding-web-premium", check=False)
         print("Deployment finished.")
     finally:
         client.close()
