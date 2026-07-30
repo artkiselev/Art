@@ -19,6 +19,9 @@ PROJECT_FILES = [
     "questionnaire.py",
     "requirements.txt",
     "storage.py",
+    "telegram_sender.py",
+    "web_app.py",
+    "web_storage.py",
     "README.md",
 ]
 
@@ -40,7 +43,7 @@ def main() -> None:
     client = connect(host, port, user, password, key_path)
     try:
         run(client, "uname -a")
-        run(client, f"mkdir -p {shlex.quote(app_dir)}/data/voice {shlex.quote(app_dir)}/outputs")
+        run(client, f"mkdir -p {shlex.quote(app_dir)}/data/voice {shlex.quote(app_dir)}/data/web_voice {shlex.quote(app_dir)}/outputs")
         upload_project(client, app_dir, app_env_path)
 
         run(client, "DEBIAN_FRONTEND=noninteractive apt-get update", timeout=600)
@@ -58,11 +61,16 @@ def main() -> None:
 
         service_text = (ROOT / "deploy" / "wedding-bot.service").read_text(encoding="utf-8")
         write_remote_file(client, "/etc/systemd/system/wedding-bot.service", service_text)
+        web_service_text = (ROOT / "deploy" / "wedding-web.service").read_text(encoding="utf-8")
+        write_remote_file(client, "/etc/systemd/system/wedding-web.service", web_service_text)
         run(client, "systemctl daemon-reload")
         run(client, "systemctl enable wedding-bot")
+        run(client, "systemctl enable wedding-web")
         run(client, "systemctl restart wedding-bot")
+        run(client, "systemctl restart wedding-web")
         time.sleep(3)
         run(client, "systemctl --no-pager --full status wedding-bot", check=False)
+        run(client, "systemctl --no-pager --full status wedding-web", check=False)
         print("Deployment finished.")
     finally:
         client.close()
@@ -121,6 +129,10 @@ def upload_project(client: paramiko.SSHClient, app_dir: str, app_env_path: Path)
         for name in PROJECT_FILES:
             upload_file(sftp, ROOT / name, posixpath.join(app_dir, name))
         upload_file(sftp, app_env_path, posixpath.join(app_dir, ".env"))
+        access_codes_path = ROOT / "data" / "access_codes.txt"
+        if access_codes_path.exists():
+            mkdir_p(sftp, posixpath.join(app_dir, "data"))
+            upload_file(sftp, access_codes_path, posixpath.join(app_dir, "data", "access_codes.txt"))
     print(f"Uploaded project files to {app_dir}.")
 
 
