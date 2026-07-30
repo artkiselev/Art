@@ -33,5 +33,6 @@ cp deploy/wedding-web.service "$WEB_SERVICE_FILE"
 systemctl daemon-reload
 systemctl enable wedding-bot
 systemctl enable wedding-web
+ufw allow 8080/tcp || true
 
 echo "Installed. Edit $APP_DIR/.env, then run: systemctl restart wedding-bot wedding-web"

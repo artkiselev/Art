@@ -68,6 +68,7 @@ def main() -> None:
         run(client, "systemctl enable wedding-web")
         run(client, "systemctl restart wedding-bot")
         run(client, "systemctl restart wedding-web")
+        run(client, "ufw allow 8080/tcp || true", check=False)
         time.sleep(3)
         run(client, "systemctl --no-pager --full status wedding-bot", check=False)
         run(client, "systemctl --no-pager --full status wedding-web", check=False)
